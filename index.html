@@ -69,51 +69,41 @@
                 return () => subscription.unsubscribe();
             }, []);
 
-            const handleUserSession = async (currUser) => {
-                setUser(currUser);
-                
-                // 1. ดึงโปรไฟล์
-                const { data: profData } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', currUser.id)
-                    .maybeSingle();
+                const { data: profData, error: profileError } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .eq('id', currUser.id)
+        .maybeSingle();
 
-                if (profData) {
-                    setProfile(profData);
+    if (profileError) {
+        console.error(profileError);
+        return;
+    }
 
-                    // 2. ดึงชื่อบริษัท
-                    const { data: compData } = await supabase
-                        .from('companies')
-                        .select('*')
-                        .eq('id', profData.company_id)
-                        .maybeSingle();
-                    if (compData) setCompany(compData);
+    if (profData) {
+        setProfile(profData);
 
-                    // 3. ดึงธุรกรรมการเงิน
-                    fetchTransactions(profData.company_id);
-                }
-                setLoading(false);
-            };
+        const { data: compData, error: companyError } = await supabaseClient
+            .from('companies')
+            .select('*')
+            .eq('id', profData.company_id)
+            .maybeSingle();
 
-            const fetchTransactions = async (companyId) => {
-                const { data } = await supabase
-                    .from('transactions')
-                    .select('*')
-                    .eq('company_id', companyId)
-                    .order('created_at', { ascending: false });
-                if (data) setTransactions(data);
-            };
+        if (companyError) {
+            console.error(companyError);
+        }
 
-            // ฟังก์ชันเข้าสู่ระบบ (Login)
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) {
-                    alert('เข้าสู่ระบบไม่สำเร็จ: ' + error.message);
-                    setLoading(false);
-                }
+        if (compData) {
+            setCompany(compData);
+        }
+
+        await fetchTransactions(profData.company_id);
+    }
+} catch (err) {
+    console.error("Session Error:", err);
+} finally {
+    setLoading(false);
+}
             };
 
             // 🔥 ฟังก์ชันลงทะเบียนใหม่ (Sign Up)
