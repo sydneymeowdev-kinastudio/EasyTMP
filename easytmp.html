@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easytmp - Money Manage</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const SUPABASE_URL = "YOUR_SUPABASE_URL";
+        const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        function EasytmpApp() {
+            const [user, setUser] = React.useState(null);
+            const [profile, setProfile] = React.useState(null);
+            const [company, setCompany] = React.useState(null);
+            const [transactions, setTransactions] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
+
+            const [authMode, setAuthMode] = React.useState('login');
+
+            const [email, setEmail] = React.useState('');
+            const [password, setPassword] = React.useState('');
+            const [companyId, setCompanyId] = React.useState('');
+            const [role, setRole] = React.useState('staff');
+
+            const [desc, setDesc] = React.useState('');
+            const [amount, setAmount] = React.useState('');
+            const [type, setType] = React.useState('income');
+            const [staffEmail, setStaffEmail] = React.useState('');
+            const [staffRole, setStaffRole] = React.useState('staff');
+
+            React.useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    if (session) handleUserSession(session.user);
+                    else setLoading(false);
+                });
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    if (session) {
+                        handleUserSession(session.user);
+                    } else {
+                        setUser(null);
+                        setProfile(null);
+                        setCompany(null);
+                        setTransactions([]);
+                        setLoading(false);
+                    }
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            const handleUserSession = async (currUser) => {
+                setUser(currUser);
+
+                const { data: profData } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', currUser.id)
+                    .single();
+
+                if (profData) {
+                    setProfile(profData);
+
+                    const { data: compData } = await supabase
+                        .from('companies')
+                        .select('*')
+                        .eq('id', profData.company_id)
+                        .single();
+                    if (compData) setCompany(compData);
+
+                    fetchTransactions(profData.company_id);
+                }
+                setLoading(false);
+            };
+
+            const fetchTransactions = async (cid) => {
+                const { data } = await supabase
+                    .from('transactions')
+                    .select('*')
+                    .eq('company_id', cid)
+                    .order('created_at', { ascending: false });
+                if (data) setTransactions(data);
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                const { error } = await supabase.auth.signInWithPassword({ email, password });
+                if (error) {
+                    alert('เข้าสู่ระบบไม่สำเร็จ: ' + error.message);
+                    setLoading(false);
+                }
+            };
+
+            const handleSignUp = async (e) => {
+                e.preventDefault();
+                if (!companyId) {
+                    alert('กรุณาระบุรหัสบริษัท (Company ID) ที่ต้องการร่วมงานก่อนครับ');
+                    return;
+                }
+                setLoading(true);
+
+                const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+
+                if (authError) {
+                    alert('สมัครสมาชิกผิดพลาด: ' + authError.message);
+                    setLoading(false);
+                    return;
+                }
+
+                if (authData?.user) {
+                    const { error: profError } = await supabase
+                        .from('profiles')
+                        .insert([{ id: authData.user.id, email: email, role: role, company_id: parseInt(companyId) }]);
+
+                    if (profError) {
+                        alert('เชื่อมข้อมูลบริษัทผิดพลาด: ' + profError.message);
+                    } else {
+                        alert('สมัครสมาชิกสำเร็จแล้ว! ระบบจะนำท่านเข้าหน้าแดชบอร์ด');
+                    }
+                }
+                setLoading(false);
+            };
+
+            const handleLogout = async () => {
+                await supabase.auth.signOut();
+            };
+
+            const handleAddTransaction = async (e) => {
+                e.preventDefault();
+                if (!desc || !amount) return;
+
+                const { error } = await supabase
+                    .from('transactions')
+                    .insert([{ company_id: profile.company_id, description: desc, amount: parseFloat(amount), type: type }]);
+
+                if (!error) {
+                    setDesc('');
+                    setAmount('');
+                    fetchTransactions(profile.company_id);
+                } else {
+                    alert(error.message);
+                }
+            };
+
+            const handleAddStaff = async (e) => {
+                e.preventDefault();
+                if (!staffEmail) return;
+
+                const { error } = await supabase
+                    .from('profiles')
+                    .insert([{ email: staffEmail, role: staffRole, company_id: profile.company_id }]);
+
+                if (!error) {
+                    alert(`ลงสิทธิ์พนักงาน (${staffEmail}) ในบริษัทเรียบร้อย!`);
+                    setStaffEmail('');
+                } else {
+                    alert(error.message);
+                }
+            };
+
+            if (loading) return <div className="p-8 text-center text-xl font-semibold">กำลังประมวลผลระบบ Easytmp...</div>;
+
+            if (!user) {
+                return (
+                    <div className="max-w-md mx-auto mt-16 p-6 bg-white rounded-xl shadow-lg border border-gray-100">
+                        <div className="flex justify-center space-x-4 mb-6 border-b pb-3">
+                            <button onClick={() => setAuthMode('login')} className={`text-lg font-bold pb-1 ${authMode === 'login' ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-gray-400'}`}>เข้าสู่ระบบ</button>
+                            <button onClick={() => setAuthMode('signup')} className={`text-lg font-bold pb-1 ${authMode === 'signup' ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-gray-400'}`}>สมัครสมาชิกใหม่</button>
+                        </div>
+
+                        {authMode === 'login' ? (
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <h2 className="text-xl font-bold text-center text-gray-700 mb-2">ยินดีต้อนรับกลับมา</h2>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">อีเมล</label>
+                                    <input type="email" className="w-full p-2.5 border rounded-lg mt-1 focus:ring-2 focus:ring-emerald-500" value={email} onChange={e => setEmail(e.target.value)} required />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">รหัสผ่าน</label>
+                                    <input type="password" className="w-full p-2.5 border rounded-lg mt-1 focus:ring-2 focus:ring-emerald-500" value={password} onChange={e => setPassword(e.target.value)} required />
+                                </div>
+                                <button type="submit" className="w-full bg-emerald-600 text-white p-2.5 rounded-lg font-semibold hover:bg-emerald-700 transition">เข้าสู่ระบบ</button>
+                            </form>
+                        ) : (
+                            <form onSubmit={handleSignUp} className="space-y-4">
+                                <h2 className="text-xl font-bold text-center text-gray-700 mb-2">สร้างบัญชีใช้งานพนักงาน</h2>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">อีเมลแอป</label>
+                                    <input type="email" className="w-full p-2.5 border rounded-lg mt-1 focus:ring-2 focus:ring-emerald-500" placeholder="yourname@company.com" value={email} onChange={e => setEmail(e.target.value)} required />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">รหัสผ่าน (6 ตัวอักษรขึ้นไป)</label>
+                                    <input type="password" className="w-full p-2.5 border rounded-lg mt-1 focus:ring-2 focus:ring-emerald-500" value={password} onChange={e => setPassword(e.target.value)} required />
+                                </div>
+                                <hr className="border-gray-100 my-2" />
+                                <div>
+                                    <label className="block text-sm font-medium text-amber-600 font-bold">รหัสเลขไอดีบริษัท (Company ID)</label>
+                                    <input type="number" className="w-full p-2.5 border border-amber-300 bg-amber-50 rounded-lg mt-1 focus:ring-2 focus:ring-amber-500" placeholder="กรอกเลข ID บริษัท เช่น 1" value={companyId} onChange={e => setCompanyId(e.target.value)} required />
+                                    <span className="text-xs text-gray-400 mt-1 block">* ถามเลข ID บริษัทได้จากหน้าแผงควบคุมของแอดมินคุณ</span>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">บทบาทสิทธิ์ (Role)</label>
+                                    <select className="w-full p-2.5 border rounded-lg mt-1 bg-gray-50" value={role} onChange={e => setRole(e.target.value)}>
+                                        <option value="staff">Staff (พนักงานบัญชีทั่วไป)</option>
+                                        <option value="admin">Admin (ผู้จัดการระบบของบริษัท)</option>
+                                    </select>
+                                </div>
+                                <button type="submit" className="w-full bg-blue-600 text-white p-2.5 rounded-lg font-semibold hover:bg-blue-700 transition">ลงทะเบียนใช้งาน</button>
+                            </form>
+                        )}
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-6xl mx-auto p-4 md:p-8">
+                    <header className="flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6">
+                        <div>
+                            <h1 className="text-3xl font-black text-gray-900 tracking-tight">Easytmp <span className="text-emerald-500 text-sm font-normal">System Portal</span></h1>
+                            <p className="text-lg text-emerald-600 font-bold mt-1">🏢 บริษัท: {company?.company_name || 'กำลังดึงข้อมูลบริษัท...'}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">ไอดีบริษัทนี้ (Company ID): <span className="font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">{profile?.company_id}</span> | สิทธิ์คุณ: <span className="font-bold text-blue-600 uppercase">{profile?.role}</span></p>
+                        </div>
+                        <button onClick={handleLogout} className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 font-medium transition">ออกจากระบบ</button>
+                    </header>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 space-y-6">
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <h2 className="text-xl font-bold mb-4 text-gray-800">💰 บันทึกรายรับ-รายจ่าย</h2>
+                                <form onSubmit={handleAddTransaction} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                                    <input type="text" placeholder="รายละเอียดรายการ" className="p-2 border rounded-lg sm:col-span-2" value={desc} onChange={e => setDesc(e.target.value)} required />
+                                    <input type="number" placeholder="จำนวนเงิน" className="p-2 border rounded-lg" value={amount} onChange={e => setAmount(e.target.value)} required />
+                                    <select className="p-2 border rounded-lg bg-gray-50" value={type} onChange={e => setType(e.target.value)}>
+                                        <option value="income">รายรับ (+)</option>
+                                        <option value="expense">รายจ่าย (-)</option>
+                                    </select>
+                                    <button type="submit" className="w-full bg-emerald-600 text-white p-2.5 rounded-lg font-semibold hover:bg-emerald-700 sm:col-span-4 transition">บันทึกธุรกรรม</button>
+                                </form>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <h3 className="text-xl font-bold mb-4 text-gray-800">📊 บัญชีรายรับ-รายจ่ายรวม</h3>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full table-auto text-left">
+                                        <thead>
+                                            <tr className="bg-gray-50 text-gray-500 text-sm">
+                                                <th className="p-3">รายละเอียด</th>
+                                                <th className="p-3">ประเภท</th>
+                                                <th className="p-3 text-right">จำนวนเงิน</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {transactions.map(tx => (
+                                                <tr key={tx.id} className="text-sm hover:bg-gray-50">
+                                                    <td className="p-3 text-gray-700">{tx.description}</td>
+                                                    <td className={`p-3 font-bold ${tx.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {tx.type === 'income' ? 'รายรับ' : 'รายจ่าย'}
+                                                    </td>
+                                                    <td className="p-3 text-right font-bold text-gray-900">{tx.amount.toLocaleString()} บาท</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-fit">
+                            <h2 className="text-xl font-bold mb-2 text-indigo-600">👥 เมนูการจัดการ (Admin)</h2>
+                            {profile?.role === 'admin' ? (
+                                <form onSubmit={handleAddStaff} className="space-y-4">
+                                    <p className="text-xs text-gray-500 leading-relaxed">เพิ่มชื่อพนักงานใหม่ในระบบเพื่อให้เขาสามารถใช้สิทธิ์ของบริษัทนี้ได้</p>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-600">อีเมลพนักงานใหม่</label>
+                                        <input type="email" className="w-full p-2 border rounded-lg mt-1" placeholder="staff@company.com" value={staffEmail} onChange={e => setStaffEmail(e.target.value)} required />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-600">ตำแหน่งงาน</label>
+                                        <select className="w-full p-2 border rounded-lg mt-1 bg-gray-50" value={staffRole} onChange={e => setStaffRole(e.target.value)}>
+                                            <option value="staff">Staff (พิมพ์บัญชีและเปิดดูได้อย่างเดียว)</option>
+                                            <option value="admin">Admin (สิทธิ์ผู้ควบคุมร่วม)</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" className="w-full bg-indigo-600 text-white p-2 rounded-lg font-bold hover:bg-indigo-700 transition">อนุมัติพนักงาน</button>
+                                </form>
+                            ) : (
+                                <div className="bg-red-50 text-red-600 p-4 rounded-lg text-xs">
+                                    ⚠️ บัญชีของคุณคือ Staff ทั่วไป ไม่มีสิทธิ์เพิ่มหรือเห็นข้อมูลโครงสร้างบริษัทร่วมชิ้นอื่นครับ
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<EasytmpApp />);
+    </script>
+</body>
+</html>
