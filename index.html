@@ -278,8 +278,8 @@ const SUPABASE_URL = "https://ayveduruxirxojeubexr.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5dmVkdXJ1eGlyeG9qZXViZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDIxNzksImV4cCI6MjA5NzA3ODE3OX0.k4wjEhi_gTesXyCp316yt2TUCPOgsGvzLK0qkM6UqQo";
 const B2_ENDPOINT = "https://s3.us-east-005.backblazeb2.com"; // e.g. https://s3.us-west-004.backblazeb2.com
 const B2_REGION = "us-east-005"; // e.g. us-west-004
-const B2_ACCESS_KEY_ID = "K005lJvTvIycDBCF9Qtms81QSViNDuo";
-const B2_SECRET_KEY = "005c9394bf639250000000001";
+const B2_ACCESS_KEY_ID = ""; // Set outside git before enabling direct B2 uploads
+const B2_SECRET_KEY = ""; // Never commit storage secret keys to GitHub
 const B2_BUCKET_NAME = "easytmp-slips";
 const B2_PUBLIC_BASE = "https://f005.backblazeb2.com/file/easytmp-slips";
 /* ══════════════════════════════════════════ */
@@ -331,6 +331,9 @@ function fmtDate(s) { return s ? new Date(s).toLocaleDateString('th-TH', { day: 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 // ── Upload slip to B2
 async function uploadToB2(file, onProgress) {
+    if (!B2_ACCESS_KEY_ID || !B2_SECRET_KEY) {
+        throw new Error('ยังไม่ได้ตั้งค่า B2 upload keys; กรุณาตั้งค่าผ่าน backend/secret storage ก่อนอัปโหลดสลิป');
+    }
     const key = `slips/${uid()}_${file.name.replace(/\s+/g, '_')}`;
     await new Promise((resolve, reject) => {
         b2.upload({
