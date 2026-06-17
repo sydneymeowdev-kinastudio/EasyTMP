@@ -174,16 +174,16 @@ body{font-family:'Prompt',sans-serif;background:#f0f4f8;min-height:100vh;-webkit
 /* ══════════════════════════════════
    ✏️  ใส่ credentials ที่นี่
 ══════════════════════════════════ */
-const SUPABASE_URL      = "YOUR_SUPABASE_URL";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL      = "https://ayveduruxirxojeubexr.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5dmVkdXJ1eGlyeG9qZXViZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDIxNzksImV4cCI6MjA5NzA3ODE3OX0.k4wjEhi_gTesXyCp316yt2TUCPOgsGvzLK0qkM6UqQo";
 
 // Backblaze B2 — สำหรับสลิปเท่านั้น
-const B2_ENDPOINT      = "YOUR_B2_ENDPOINT";        // e.g. https://s3.us-west-004.backblazeb2.com
-const B2_REGION        = "YOUR_B2_REGION";          // e.g. us-west-004
-const B2_KEY_ID        = "YOUR_B2_APPLICATION_KEY_ID";
-const B2_APP_KEY       = "YOUR_B2_APPLICATION_KEY";
-const B2_BUCKET        = "YOUR_B2_BUCKET_NAME";
-const B2_PUBLIC_BASE   = "YOUR_B2_PUBLIC_URL";      // e.g. https://f004.backblazeb2.com/file/mybucket
+const B2_ENDPOINT      = "https://s3.us-east-005.backblazeb2.com";        // e.g. https://s3.us-west-004.backblazeb2.com
+const B2_REGION        = "us-east-005";          // e.g. us-west-004
+const B2_KEY_ID        = "005c9394bf639250000000002";
+const B2_APP_KEY       = "K00566Y1o2hGwpvTv5n+27dgnJaDOdk";
+const B2_BUCKET        = "easytmp-slips";
+const B2_PUBLIC_BASE   = "https://f005.backblazeb2.com/file/easytmp-slips";      // e.g. https://f004.backblazeb2.com/file/mybucket
 /* ══════════════════════════════════ */
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
