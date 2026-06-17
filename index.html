@@ -266,7 +266,9 @@ body{font-family:'Prompt',sans-serif;background:#f0f4f8;min-height:100vh;-webkit
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:Prompt,Arial,sans-serif;color:#667;background:#f0f4f8;">กำลังโหลด Easytmp...</div>
+</div>
 
 <script type="text/babel">
 /* ══════════════════════════════════════════
@@ -275,7 +277,7 @@ body{font-family:'Prompt',sans-serif;background:#f0f4f8;min-height:100vh;-webkit
 const SUPABASE_URL      = "https://ayveduruxirxojeubexr.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5dmVkdXJ1eGlyeG9qZXViZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDIxNzksImV4cCI6MjA5NzA3ODE3OX0.k4wjEhi_gTesXyCp316yt2TUCPOgsGvzLK0qkM6UqQo";
 
-const B2_ENDPOINT       = "s3.us-east-005.backblazeb2.com";          // e.g. https://s3.us-west-004.backblazeb2.com
+const B2_ENDPOINT       = "https://s3.us-east-005.backblazeb2.com";          // e.g. https://s3.us-west-004.backblazeb2.com
 const B2_REGION         = "us-east-005";            // e.g. us-west-004
 const B2_ACCESS_KEY_ID  = "K005lJvTvIycDBCF9Qtms81QSViNDuo";
 const B2_SECRET_KEY     = "005c9394bf639250000000001";
@@ -283,6 +285,36 @@ const B2_BUCKET_NAME    = "easytmp-slips";
 const B2_PUBLIC_BASE    = "https://f005.backblazeb2.com/file/easytmp-slips"; 
 
 /* ══════════════════════════════════════════ */
+
+function showStartupError(message) {
+  const root = document.getElementById('root');
+  if (root) {
+    root.innerHTML = `
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f0f4f8;font-family:Prompt,Arial,sans-serif;padding:1rem;">
+        <div style="max-width:520px;background:#fff;border-radius:20px;padding:1.5rem;box-shadow:0 12px 40px rgba(0,0,0,.12);color:#333;line-height:1.7;">
+          <h1 style="font-size:1.15rem;margin-bottom:.5rem;color:#c62828;">โหลดแอปไม่สำเร็จ</h1>
+          <p>${message}</p>
+          <p style="font-size:.82rem;color:#777;margin-top:.75rem;">โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตและ CDN scripts แล้วรีเฟรชหน้าเว็บ</p>
+        </div>
+      </div>`;
+  }
+}
+
+window.addEventListener('error', (event) => {
+  showStartupError(event.message || 'เกิดข้อผิดพลาดขณะโหลดแอป');
+});
+window.addEventListener('unhandledrejection', (event) => {
+  showStartupError(event.reason?.message || 'เกิดข้อผิดพลาดขณะโหลดข้อมูล');
+});
+
+if (!window.supabase) {
+  showStartupError('ไม่พบ Supabase SDK จาก CDN');
+  throw new Error('Supabase SDK failed to load');
+}
+if (!window.AWS) {
+  showStartupError('ไม่พบ AWS SDK จาก CDN');
+  throw new Error('AWS SDK failed to load');
+}
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
