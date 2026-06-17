@@ -78,7 +78,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // GLOBAL SYSTEM CRITICAL CONFIGURATIONS
+        // GLOBAL LIVE PRODUCTION CREDENTIALS
         const SUPABASE_URL = "https://ayveduruxirxojeubexr.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5dmVkdXJ1eGlyeG9qZXViZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDIxNzksImV4cCI6MjA5NzA3ODE3OX0.k4wjEhi_gTesXyCp316yt2TUCPOgsGvzLK0qkM6UqQo";
 
@@ -97,6 +97,867 @@
             AWS.config.update({
                 accessKeyId: B2_ACCESS_KEY_ID,
                 secretAccessKey: B2_SECRET_ACCESS_KEY,
+                region: B2_REGION
+            });
+            const s3 = new AWS.S3({
+                endpoint: new AWS.Endpoint(B2_ENDPOINT),
+                signatureVersion: 'v4'
+            });
+            const ext = file.name.split('.').pop();
+            const cleanFileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`;
+            const params = {
+                Bucket: B2_BUCKET_NAME,
+                Key: cleanFileName,
+                Body: file,
+                ContentType: file.type
+            };
+            await s3.putObject(params).promise();
+            return `${B2_PUBLIC_BASE_URL}${cleanFileName}`;
+        }
+
+        // Main App Component
+        function App() {
+            // UI & Async Loading States
+            const [loading, setLoading] = React.useState(true);
+            const [actionLoading, setActionLoading] = React.useState(false);
+            const [toast, setToast] = React.useState(null);
+
+            // Authentication & Domain States
+            const [user, setUser] = React.useState(null);
+            const [profile, setProfile] = React.useState(null);
+            const [company, setCompany] = React.useState(null);
+            
+            // App Data States
+            const [transactions, setTransactions] = React.useState([]);
+            const [pendingStaff, setPendingStaff] = React.useState([]);
+            const [activeTab, setActiveTab] = React.useState('dashboard'); // dashboard | staff
+
+            // Form States (Auth Flow)
+            const [isSignUp, setIsSignUp] = React.useState(false);
+            const [authEmail, setAuthEmail] = React.useState('');
+            const [authPassword, setAuthPassword] = React.useState('');
+            const [authFullName, setAuthFullName] = React.useState('');
+            const [authCompanyMode, setAuthCompanyMode] = React.useState('join'); // create | join
+            const [authCompanyName, setAuthCompanyName] = React.useState('');
+            const [authCompanyId, setAuthCompanyId] = React.useState('');
+
+            // Form States (Transaction Workflows)
+            const [showTxModal, setShowTxModal] = React.useState(false);
+            const [txEditingId, setTxEditingId] = React.useState(null);
+            const [txDescription, setTxDescription] = React.useState('');
+            const [txAmount, setTxAmount] = React.useState('');
+            const [txType, setTxType] = React.useState('income'); // income | expense
+            const [txFile, setTxFile] = React.useState(null);
+            const [txExistingSlipUrl, setTxExistingSlipUrl] = React.useState('');
+
+            // UI Control Overlay States
+            const [activeLightboxUrl, setActiveLightboxUrl] = React.useState(null);
+            const [deleteConfirmId, setDeleteConfirmId] = React.useState(null);
+
+            // Toast feedback trigger helper
+            const triggerToast = (message, type = 'success') => {
+                setToast({ message, type });
+                setTimeout(() => setToast(null), 4000);
+            };
+
+            // Catch core authentications on mount
+            React.useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    if (session) {
+                        setUser(session.user);
+                        fetchUserProfile(session.user.id);
+                    } else {
+                        setLoading(false);
+                    }
+                });
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    if (session) {
+                        setUser(session.user);
+                        fetchUserProfile(session.user.id);
+                    } else {
+                        setUser(null);
+                        setProfile(null);
+                        setCompany(null);
+                        setTransactions([]);
+                        setPendingStaff([]);
+                        setLoading(false);
+                    }
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            // Core Profile & Context Resolver
+            async function fetchUserProfile(userId) {
+                try {
+                    // Safe Fetch User Profile
+                    const { data: profileData, error: profileErr } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', userId)
+                        .maybeSingle();
+
+                    if (profileErr) throw profileErr;
+
+                    if (profileData) {
+                        setProfile(profileData);
+                        
+                        // Safe Fetch Company Matrix
+                        if (profileData.company_id) {
+                            const { data: companyData, error: compErr } = await supabase
+                                .from('companies')
+                                .select('*')
+                                .eq('id', profileData.company_id)
+                                .maybeSingle();
+                            
+                            if (compErr) throw compErr;
+                            setCompany(companyData);
+
+                            // Load Transactional Data Stream if approved
+                            if (profileData.is_approved) {
+                                await fetchTransactionData(profileData.company_id);
+                                if (profileData.role === 'admin') {
+                                    await fetchPendingStaff(profileData.company_id);
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("Context mapping error: ", err.message);
+                    triggerToast("เกิดข้อผิดพลาดในการดึงข้อมูลระบบ", "error");
+                } finally {
+                    setLoading(false);
+                }
+            }
+
+            async function fetchTransactionData(companyId) {
+                const { data, error } = await supabase
+                    .from('transactions')
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('created_at', { ascending: false });
+                if (!error && data) setTransactions(data);
+            }
+
+            async function fetchPendingStaff(companyId) {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .eq('is_approved', false);
+                if (!error && data) setPendingStaff(data);
+            }
+
+            // Auth Process Controllers
+            async function handleAuthSubmit(e) {
+                e.preventDefault();
+                setActionLoading(true);
+                try {
+                    if (isSignUp) {
+                        // Sign Up Workflow
+                        let targetedCompanyId = authCompanyId.trim();
+
+                        if (authCompanyMode === 'create') {
+                            if (!authCompanyName.trim()) throw new Error("กรุณาระบุชื่อบริษัท");
+                            
+                            // Insert Company Record
+                            const { data: newCompany, error: compErr } = await supabase
+                                .from('companies')
+                                .insert([{ name: authCompanyName.trim() }])
+                                .select()
+                                .single();
+                            
+                            if (compErr) throw compErr;
+                            targetedCompanyId = newCompany.id;
+                        } else {
+                            if (!targetedCompanyId) throw new Error("กรุณาระบุรหัสบริษัทที่ต้องการเข้าร่วม");
+                        }
+
+                        const { data: authData, error: signUpErr } = await supabase.auth.signUp({
+                            email: authEmail,
+                            password: authPassword,
+                        });
+
+                        if (signUpErr) throw signUpErr;
+
+                        if (authData.user) {
+                            // Seed User Profile
+                            const roleType = authCompanyMode === 'create' ? 'admin' : 'staff';
+                            const approvalStatus = authCompanyMode === 'create' ? true : false;
+
+                            const { error: profErr } = await supabase
+                                .from('profiles')
+                                .insert([{
+                                    id: authData.user.id,
+                                    full_name: authFullName.trim(),
+                                    role: roleType,
+                                    company_id: targetedCompanyId,
+                                    is_approved: approvalStatus
+                                }]);
+                            
+                            if (profErr) throw profErr;
+                            triggerToast("ลงทะเบียนสำเร็จแล้ว");
+                            fetchUserProfile(authData.user.id);
+                        }
+                    } else {
+                        // Sign In Workflow
+                        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+                            email: authEmail,
+                            password: authPassword,
+                        });
+                        if (signInErr) throw signInErr;
+                        triggerToast("เข้าสู่ระบบสำเร็จ");
+                        fetchUserProfile(signInData.user.id);
+                    }
+                } catch (error) {
+                    triggerToast(error.message, "error");
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            async function handleLogout() {
+                await supabase.auth.signOut();
+                triggerToast("ออกจากระบบเรียบร้อย");
+            }
+
+            // Organization Workspace Logo Modification 
+            async function handleLogoUpload(e) {
+                const file = e.target.files[0];
+                if (!file || !company?.id) return;
+
+                setActionLoading(true);
+                try {
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${company.id}-${Date.now()}.${fileExt}`;
+                    const filePath = `${fileName}`;
+
+                    const { error: uploadErr } = await supabase.storage
+                        .from('logos')
+                        .upload(filePath, file, { upsert: true });
+
+                    if (uploadErr) throw uploadErr;
+
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('logos')
+                        .getPublicUrl(filePath);
+
+                    const { error: updateErr } = await supabase
+                        .from('companies')
+                        .update({ logo_url: publicUrl })
+                        .eq('id', company.id);
+
+                    if (updateErr) throw updateErr;
+
+                    setCompany({ ...company, logo_url: publicUrl });
+                    triggerToast("อัปเดตโลโก้องค์กรสำเร็จ");
+                } catch (err) {
+                    triggerToast(err.message, "error");
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // Staff Verification State Adjustments
+            async function handleApproveStaff(staffId) {
+                setActionLoading(true);
+                try {
+                    const { error } = await supabase
+                        .from('profiles')
+                        .update({ is_approved: true })
+                        .eq('id', staffId);
+
+                    if (error) throw error;
+                    triggerToast("อนุมัติพนักงานเรียบร้อยแล้ว");
+                    if (profile?.company_id) {
+                        await fetchPendingStaff(profile.company_id);
+                    }
+                } catch (err) {
+                    triggerToast(err.message, "error");
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // Transaction Mutators (Create / Update / Delete Action Blocks)
+            function openAddTxModal() {
+                setTxEditingId(null);
+                setTxDescription('');
+                setTxAmount('');
+                setTxType('income');
+                setTxFile(null);
+                setTxExistingSlipUrl('');
+                setShowTxModal(true);
+            }
+
+            function openEditTxModal(tx) {
+                setTxEditingId(tx.id);
+                setTxDescription(tx.description);
+                setTxAmount(tx.amount.toString());
+                setTxType(tx.type);
+                setTxFile(null);
+                setTxExistingSlipUrl(tx.slip_url || '');
+                setShowTxModal(true);
+            }
+
+            async function handleSaveTransaction(e) {
+                e.preventDefault();
+                if (!txDescription.trim() || !txAmount) {
+                    triggerToast("กรุณากรอกข้อมูลให้ครบถ้วน", "error");
+                    return;
+                }
+
+                setActionLoading(true);
+                try {
+                    let slipUrl = txExistingSlipUrl;
+
+                    // Execute robust AWS SDK upload sequences if standard physical document was captured
+                    if (txFile) {
+                        slipUrl = await uploadFileToB2(txFile);
+                    }
+
+                    const txPayload = {
+                        description: txDescription.trim(),
+                        amount: parseFloat(txAmount),
+                        type: txType,
+                        slip_url: slipUrl,
+                        company_id: profile?.company_id
+                    };
+
+                    if (txEditingId) {
+                        // Fire Update Command
+                        const { error } = await supabase
+                            .from('transactions')
+                            .update(txPayload)
+                            .eq('id', txEditingId);
+                        if (error) throw error;
+                        triggerToast("แก้ไขรายการเรียบร้อย");
+                    } else {
+                        // Fire Creation Query
+                        const { error } = await supabase
+                            .from('transactions')
+                            .insert([txPayload]);
+                        if (error) throw error;
+                        triggerToast("เพิ่มรายการเรียบร้อย");
+                    }
+
+                    setShowTxModal(false);
+                    if (profile?.company_id) await fetchTransactionData(profile.company_id);
+                } catch (err) {
+                    triggerToast(err.message, "error");
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            async function executeDeleteTransaction() {
+                if (!deleteConfirmId) return;
+                setActionLoading(true);
+                try {
+                    const { error } = await supabase
+                        .from('transactions')
+                        .delete()
+                        .eq('id', deleteConfirmId);
+                    
+                    if (error) throw error;
+                    triggerToast("ลบรายการสำเร็จ");
+                    setDeleteConfirmId(null);
+                    if (profile?.company_id) await fetchTransactionData(profile.company_id);
+                } catch (err) {
+                    triggerToast(err.message, "error");
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // Calculated Ledger Summaries 
+            const aggregateMetrics = React.useMemo(() => {
+                let income = 0;
+                let expense = 0;
+                transactions.forEach(t => {
+                    if (t.type === 'income') income += t.amount;
+                    else if (t.type === 'expense') expense += t.amount;
+                });
+                return {
+                    totalIncome: income,
+                    totalExpense: expense,
+                    balance: income - expense
+                };
+            }, [transactions]);
+
+
+            // INITIAL HARD BOOTSTRAP LOADER 
+            if (loading) {
+                return (
+                    <div className="fixed inset-0 bg-slate-50 flex flex-col justify-center items-center z-50">
+                        <div className="custom-spinner mb-4"></div>
+                        <p className="text-slate-500 font-medium tracking-wide text-sm">กำลังโหลดระบบระบบจัดการเงิน...</p>
+                    </div>
+                );
+            }
+
+            // AUTHENTICATION VISUAL FRAMEWORK (LOGIN / SIGNUP BOARDS)
+            if (!user) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-100 to-blue-50/30">
+                        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-8 animate-scale-in">
+                            <div className="text-center mb-8">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-200 mb-4">
+                                    <i className="fa-solid fa-wallet text-2xl"></i>
+                                </div>
+                                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Easytmp</h1>
+                                <p className="text-slate-500 text-sm mt-1">ระบบบริหารจัดการรายรับ - รายจ่ายภายในองค์กร</p>
+                            </div>
+
+                            <form onSubmit={handleAuthSubmit} className="space-y-5">
+                                {isSignUp && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">ชื่อ - นามสกุล</label>
+                                        <div className="relative">
+                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                                                <i className="fa-solid fa-user text-sm"></i>
+                                            </span>
+                                            <input required type="text" value={authFullName} onChange={e => setAuthFullName(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all" placeholder="สมชาย ใจดี" />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">อีเมลผู้ใช้งาน</label>
+                                    <div className="relative">
+                                        <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                                            <i className="fa-solid fa-envelope text-sm"></i>
+                                        </span>
+                                        <input required type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all" placeholder="name@company.com" />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">รหัสผ่าน</label>
+                                    <div className="relative">
+                                        <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                                            <i className="fa-solid fa-lock text-sm"></i>
+                                        </span>
+                                        <input required type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all" placeholder="••••••••" minLength={6} />
+                                    </div>
+                                </div>
+
+                                {isSignUp && (
+                                    <div className="pt-2 border-t border-slate-100">
+                                        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">โครงสร้างสิทธิ์องค์กร</label>
+                                        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-4">
+                                            <button type="button" onClick={() => setAuthCompanyMode('join')} className={`py-1.5 text-xs font-medium rounded-lg transition-all ${authCompanyMode === 'join' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600'}`}>เข้าร่วมบริษัทเดิม</button>
+                                            <button type="button" onClick={() => setAuthCompanyMode('create')} className={`py-1.5 text-xs font-medium rounded-lg transition-all ${authCompanyMode === 'create' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600'}`}>สร้างบริษัทใหม่</button>
+                                        </div>
+
+                                        {authCompanyMode === 'create' ? (
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-500 mb-1.5">ชื่อบริษัท / องค์กร</label>
+                                                <input required={authCompanyMode === 'create'} type="text" value={authCompanyName} onChange={e => setAuthCompanyName(e.target.value)} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all" placeholder="บริษัท เอบีซี จำกัด" />
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-500 mb-1.5">รหัสอ้างอิงบริษัท (Company ID)</label>
+                                                <input required={authCompanyMode === 'join'} type="text" value={authCompanyId} onChange={e => setAuthCompanyId(e.target.value)} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all" placeholder="ป้อน UUID ของบริษัทที่คุณได้รับเชิญ" />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <button type="submit" disabled={actionLoading} className="w-full btn-interact bg-blue-600 text-white font-medium py-2.5 rounded-xl text-sm shadow-md shadow-blue-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
+                                    {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-top-2 border-white rounded-full animate-spin"></div> : null}
+                                    {isSignUp ? 'สร้างบัญชีผู้ใช้งานใหม่' : 'ลงชื่อเข้าใช้งาน'}
+                                </button>
+                            </form>
+
+                            <div className="mt-6 text-center text-xs text-slate-500">
+                                {isSignUp ? (
+                                    <p>มีบัญชีผู้ใช้อยู่แล้ว? <button onClick={() => setIsSignUp(false)} className="text-blue-600 font-semibold hover:underline">เข้าสู่ระบบที่นี่</button></p>
+                                ) : (
+                                    <p>ยังไม่มีบัญชีผู้ใช้งาน? <button onClick={() => setIsSignUp(true)} className="text-blue-600 font-semibold hover:underline">สร้างบัญชีผู้ใช้ใหม่</button></p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // UNAPPROVED MEMBERS INTERCEPT MODAL
+            if (profile && !profile.is_approved) {
+                return (
+                    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-8 text-center animate-scale-in">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-50 text-amber-500 mb-4">
+                                <i className="fa-solid fa-clock-rotate-left text-2xl animate-pulse"></i>
+                            </div>
+                            <h2 className="text-xl font-bold text-slate-900 tracking-tight mb-2">อยู่ระหว่างการรออนุมัติสิทธิ์</h2>
+                            <p className="text-slate-500 text-sm leading-relaxed mb-6">
+                                บัญชีผู้ใช้ของคุณเชื่อมโยงกับกลุ่มงานแล้วเรียบร้อย กรุณารอผู้ดูแลระบบ (Admin) ยืนยันเพื่อเข้าถึงข้อมูลรายรับ - รายจ่าย
+                            </p>
+                            
+                            <div className="p-3 bg-slate-50 rounded-xl text-left border border-slate-100 mb-6">
+                                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Company Identification Key</span>
+                                <code className="text-xs font-mono text-slate-700 block break-all select-all selection:bg-blue-200">{profile?.company_id}</code>
+                            </div>
+
+                            <button onClick={handleLogout} className="btn-interact text-sm font-medium text-rose-600 bg-rose-50 px-5 py-2 rounded-xl transition-all cursor-pointer">
+                                <i className="fa-solid fa-arrow-right-from-bracket mr-2"></i>ออกจากระบบ
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            // FULL CORE APPLICATION DESKTOP/MOBILE RUNTIME SURFACE
+            return (
+                <div className="min-h-screen bg-slate-50 flex flex-col pb-12">
+                    
+                    {/* Header Controls Panel */}
+                    <header className="bg-white border-b border-slate-100 sticky top-0 z-40 shadow-xs">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                {company?.logo_url ? (
+                                    <img src={company?.logo_url} alt="Workspace Logo" className="w-9 h-9 rounded-lg object-cover border border-slate-200 shadow-2xs" />
+                                ) : (
+                                    <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-xs">E</div>
+                                )}
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <h2 className="text-base font-bold text-slate-900 leading-tight">{company?.name || 'Easytmp Dashboard'}</h2>
+                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wide ${profile?.role === 'admin' ? 'bg-purple-50 text-purple-600 border border-purple-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                                            {profile?.role === 'admin' ? 'ผู้ดูแล' : 'พนักงาน'}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 font-medium">รหัสองค์กร: <span className="font-mono text-slate-500 bg-slate-50 px-1 py-0.5 rounded text-[11px] select-all">{profile?.company_id}</span></p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                <div className="text-right hidden md:block">
+                                    <span className="block text-sm font-semibold text-slate-800">{profile?.full_name || 'Anonymous User'}</span>
+                                    <span className="block text-xs text-slate-400">{user?.email}</span>
+                                </div>
+                                <button onClick={handleLogout} className="btn-interact w-9 h-9 rounded-xl bg-slate-50 hover:bg-rose-50 text-slate-500 hover:text-rose-600 flex items-center justify-center border border-slate-200/60 cursor-pointer transition-all" title="ออกจากระบบ">
+                                    <i className="fa-solid fa-arrow-right-from-bracket text-sm"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* App Container */}
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 w-full flex-1">
+                        
+                        {/* Tab Segment Controls */}
+                        {profile?.role === 'admin' && (
+                            <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl w-fit mb-6 border border-slate-200">
+                                <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 text-xs font-semibold rounded-lg btn-interact cursor-pointer ${activeTab === 'dashboard' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'}`}>
+                                    <i className="fa-solid fa-chart-pie mr-1.5"></i>หน้าหลัก & รายการเงิน
+                                </button>
+                                <button onClick={() => setActiveTab('staff')} className={`px-4 py-2 text-xs font-semibold rounded-lg btn-interact relative cursor-pointer ${activeTab === 'staff' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'}`}>
+                                    <i className="fa-solid fa-users-gear mr-1.5"></i>จัดการพนักงาน
+                                    {pendingStaff.length > 0 && (
+                                        <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">{pendingStaff.length}</span>
+                                    )}
+                                </button>
+                            </div>
+                        )}
+
+                        {activeTab === 'dashboard' ? (
+                            <div className="space-y-6 animate-slide-up">
+                                
+                                {/* Financial Aggregates Grid Metrics */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                    {/* Total Balance Card */}
+                                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
+                                        <div>
+                                            <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">ยอดคงเหลือรวม</span>
+                                            <h3 className={`text-2xl font-bold tracking-tight ${aggregateMetrics.balance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                                                ฿ {aggregateMetrics.balance.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                                            </h3>
+                                        </div>
+                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${aggregateMetrics.balance >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                            <i className="fa-solid fa-scale-balanced text-lg"></i>
+                                        </div>
+                                    </div>
+
+                                    {/* Income Metric Card */}
+                                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
+                                        <div>
+                                            <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">รายรับทั้งหมด</span>
+                                            <h3 className="text-2xl font-bold tracking-tight text-emerald-600">
+                                                ฿ {aggregateMetrics.totalIncome.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                                            </h3>
+                                        </div>
+                                        <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                                            <i className="fa-solid fa-circle-arrow-down text-lg"></i>
+                                        </div>
+                                    </div>
+
+                                    {/* Expense Metric Card */}
+                                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
+                                        <div>
+                                            <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">รายจ่ายทั้งหมด</span>
+                                            <h3 className="text-2xl font-bold tracking-tight text-rose-600">
+                                                ฿ {aggregateMetrics.totalExpense.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                                            </h3>
+                                        </div>
+                                        <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                                            <i className="fa-solid fa-circle-arrow-up text-lg"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Main Operations Area */}
+                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                                    <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-50/50">
+                                        <div>
+                                            <h3 className="font-bold text-slate-900 text-base">บันทึกธุรกรรมทางการเงิน</h3>
+                                            <p className="text-xs text-slate-400 mt-0.5">รวมรายการเดินบัญชีและเอกสารสลิปหลักฐานทั้งหมดในระบบ</p>
+                                        </div>
+                                        <button onClick={openAddTxModal} className="btn-interact bg-blue-600 text-white font-medium text-xs px-4 py-2.5 rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer self-start sm:self-auto">
+                                            <i className="fa-solid fa-plus text-xs"></i>เพิ่มรายการธุรกรรม
+                                        </button>
+                                    </div>
+
+                                    {/* Responsive Modern Table Elements */}
+                                    <div className="overflow-x-auto no-scrollbar">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 tracking-wider uppercase bg-slate-50/20">
+                                                    <th className="py-3 px-5">วันที่ / เวลา</th>
+                                                    <th className="py-3 px-5">รายการ / รายละเอียด</th>
+                                                    <th className="py-3 px-5 text-right">จำนวนเงิน</th>
+                                                    <th className="py-3 px-5 text-center">หลักฐานสลิป</th>
+                                                    <th className="py-3 px-5 text-center">การจัดการ</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 text-sm">
+                                                {transactions.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={5} className="text-center py-12 text-slate-400 font-medium">
+                                                            <i className="fa-solid fa-folder-open text-2xl mb-2 block text-slate-300"></i>
+                                                            ยังไม่มีประวัติการทำรายการธุรกรรมในระบบองค์กรนี้
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    transactions.map(tx => (
+                                                        <tr key={tx.id} className="hover:bg-slate-50/60 transition-colors">
+                                                            <td className="py-4 px-5 text-xs text-slate-400 font-medium">
+                                                                {new Date(tx.created_at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}
+                                                            </td>
+                                                            <td className="py-4 px-5 font-medium text-slate-800">
+                                                                {tx.description}
+                                                            </td>
+                                                            <td className={`py-4 px-5 text-right font-bold tabular-nums ${tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                                {tx.type === 'income' ? '+' : '-'} {tx.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                                                            </td>
+                                                            <td className="py-4 px-5 text-center">
+                                                                {tx.slip_url ? (
+                                                                    <button onClick={() => setActiveLightboxUrl(tx.slip_url)} className="btn-interact inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-md transition-all cursor-pointer">
+                                                                        <i className="fa-solid fa-file-invoice text-[11px]"></i>เปิดดูสลิป
+                                                                    </button>
+                                                                ) : (
+                                                                    <span className="text-xs text-slate-300 font-medium italic">ไม่มีแนบไว้</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="py-4 px-5 text-center">
+                                                                <div className="inline-flex items-center justify-center gap-1.5">
+                                                                    <button onClick={() => openEditTxModal(tx)} className="btn-interact w-8 h-8 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 flex items-center justify-center border border-slate-200/40 cursor-pointer transition-all" title="แก้ไข">
+                                                                        <i className="fa-solid fa-pen text-xs"></i>
+                                                                    </button>
+                                                                    <button onClick={() => setDeleteConfirmId(tx.id)} className="btn-interact w-8 h-8 rounded-lg bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center border border-slate-200/40 cursor-pointer transition-all" title="ลบ">
+                                                                        <i className="fa-solid fa-trash text-xs"></i>
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            /* ADMINISTRATIVE AND STAFF ROSTER VIEWS */
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-slide-up">
+                                {/* Staff Verification Request Core Section */}
+                                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                                    <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                                        <h3 className="font-bold text-slate-900 text-base">คำขออนุมัติเข้าใช้งานของพนักงาน</h3>
+                                        <p className="text-xs text-slate-400 mt-0.5">รายชื่อพนักงานที่กรอกรหัสเข้าร่วมบริษัทนี้และกำลังรอสิทธิ์เปิดใช้งาน</p>
+                                    </div>
+
+                                    <div className="divide-y divide-slate-100">
+                                        {pendingStaff.length === 0 ? (
+                                            <div className="text-center py-12 text-slate-400 font-medium">
+                                                <i className="fa-solid fa-user-check text-2xl mb-2 block text-slate-300"></i>
+                                                ไม่มีคำขออนุมัติคงค้างในขณะนี้
+                                            </div>
+                                        ) : (
+                                            pendingStaff.map(staff => (
+                                                <div key={staff.id} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
+                                                    <div>
+                                                        <h4 className="font-semibold text-slate-800 text-sm">{staff.full_name}</h4>
+                                                        <p className="text-xs text-slate-400 font-mono mt-0.5">UID: {staff.id}</p>
+                                                    </div>
+                                                    <button onClick={() => handleApproveStaff(staff.id)} disabled={actionLoading} className="btn-interact bg-emerald-600 text-white text-xs font-medium px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
+                                                        <i className="fa-solid fa-user-plus text-[11px]"></i>อนุมัติพนักงาน
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Organizational Brand Configuration Module */}
+                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-6">
+                                    <div>
+                                        <h3 className="font-bold text-slate-900 text-base">ตั้งค่าองค์กร</h3>
+                                        <p className="text-xs text-slate-400 mt-0.5">อัปเดตรูปลักษณ์หรือโลโก้กลางที่จะปรากฏบนหน้าจอรายงาน</p>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 text-center relative group">
+                                            {company?.logo_url ? (
+                                                <div className="relative">
+                                                    <img src={company.logo_url} alt="Workspace Main Logo" className="w-20 h-20 rounded-2xl object-cover shadow-md border border-slate-200" />
+                                                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] shadow-sm">
+                                                        <i className="fa-solid fa-pencil"></i>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="w-16 h-16 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center text-2xl mb-2">
+                                                    <i className="fa-solid fa-building"></i>
+                                                </div>
+                                            )}
+                                            
+                                            <label className="mt-4 block text-xs font-semibold text-blue-600 bg-white border border-slate-200 rounded-xl px-4 py-2 cursor-pointer shadow-2xs hover:border-blue-300 transition-colors btn-interact">
+                                                <span>{company?.logo_url ? 'เปลี่ยนโลโก้องค์กร' : 'อัปโหลดภาพโลโก้'}</span>
+                                                <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={actionLoading} className="hidden" />
+                                            </label>
+                                            <p className="text-[10px] text-slate-400 mt-2">รองรับไฟล์รูปภาพ PNG, JPG ขนาดไม่เกิน 2MB</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* MODAL WORKFLOW: TRANSACTION CREATION & MODIFICATION INTERFACE */}
+                    {showTxModal && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+                            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-100 animate-scale-in">
+                                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                    <h3 className="font-bold text-slate-900 text-base">
+                                        {txEditingId ? 'แก้ไขรายการธุรกรรม' : 'เพิ่มรายการธุรกรรมใหม่'}
+                                    </h3>
+                                    <button onClick={() => setShowTxModal(false)} className="w-7 h-7 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 flex items-center justify-center transition-all cursor-pointer">
+                                        <i className="fa-solid fa-xmark text-sm"></i>
+                                    </button>
+                                </div>
+
+                                <form onSubmit={handleSaveTransaction} className="p-5 space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">ประเภทธุรกรรม</label>
+                                        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
+                                            <button type="button" onClick={() => setTxType('income')} className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${txType === 'income' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600'}`}>
+                                                <i className="fa-solid fa-circle-arrow-down mr-1.5"></i>รายรับ (Income)
+                                            </button>
+                                            <button type="button" onClick={() => setTxType('expense')} className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${txType === 'expense' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-600'}`}>
+                                                <i className="fa-solid fa-circle-arrow-up mr-1.5"></i>รายจ่าย (Expense)
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">คำอธิบายรายการ</label>
+                                        <input required type="text" value={txDescription} onChange={e => setTxDescription(e.target.value)} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all" placeholder="เช่น ค่าน้ำประปา, รับชำระค่าบริการโครงการ" />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">จำนวนเงิน (บาท)</label>
+                                        <input required type="number" step="0.01" min="0.01" value={txAmount} onChange={e => setTxAmount(e.target.value)} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm font-semibold text-slate-800 transition-all" placeholder="0.00" />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">เอกสารหลักฐาน (ใบเสร็จ / สลิปโอนเงิน)</label>
+                                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex items-center justify-between gap-4">
+                                            <input type="file" accept="image/*" onChange={e => setTxFile(e.target.files[0])} className="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100 cursor-pointer" />
+                                            {txExistingSlipUrl && !txFile && (
+                                                <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">มีสลิปเดิมอยู่แล้ว</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
+                                        <button type="button" onClick={() => setShowTxModal(false)} className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer">ยกเลิก</button>
+                                        <button type="submit" disabled={actionLoading} className="btn-interact bg-blue-600 text-white text-xs font-medium px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
+                                            {actionLoading ? <div className="w-3 h-3 border-2 border-white/30 border-top-2 border-white rounded-full animate-spin"></div> : null}
+                                            บันทึกข้อมูล
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL WORKFLOW: SYSTEM CONFIRMATION OVERLAY FOR TRANSACTIONS DELETION */}
+                    {deleteConfirmId && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+                            <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 text-center border border-slate-100 animate-scale-in">
+                                <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4 text-xl">
+                                    <i className="fa-solid fa-triangle-exclamation"></i>
+                                </div>
+                                <h3 className="text-base font-bold text-slate-900 mb-1">ยืนยันการลบรายการธุรกรรม?</h3>
+                                <p className="text-xs text-slate-400 leading-relaxed mb-5">เมื่อลบรายการนี้แล้ว ข้อมูลทางบัญชีและสลิปหลักฐานที่ผูกอยู่จะถูกถอนออกจากระบบอย่างถาวรและไม่สามารถกู้คืนได้</p>
+                                
+                                <div className="flex items-center justify-center gap-2">
+                                    <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 rounded-xl transition-all cursor-pointer">ยกเลิก</button>
+                                    <button onClick={executeDeleteTransaction} disabled={actionLoading} className="btn-interact bg-rose-600 text-white text-xs font-medium px-4 py-2 rounded-xl shadow-xs cursor-pointer disabled:opacity-50">
+                                        ยืนยันการลบออก
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* LIGHTBOX OVERLAY SYSTEM FOR IMMERSIVE TRANSACTIONAL SLIP DISCOVERY */}
+                    {activeLightboxUrl && (
+                        <div onClick={() => setActiveLightboxUrl(null)} className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in cursor-zoom-out">
+                            <div className="relative max-w-3xl w-full flex items-center justify-center animate-scale-in" onClick={e => e.stopPropagation()}>
+                                <img src={activeLightboxUrl} alt="Transaction Receipt Slip" className="max-h-[85vh] w-auto max-w-full rounded-xl shadow-2xl object-contain border border-white/10" />
+                                <button onClick={() => setActiveLightboxUrl(null)} className="absolute -top-10 right-0 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all cursor-pointer">
+                                    <i className="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* HIGHLY INTERACTIVE FLOATING TRANSACTIONAL FEEDBACK TOASTS */}
+                    {toast && (
+                        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs font-medium py-3 px-5 rounded-2xl shadow-xl border border-slate-800 flex items-center gap-2.5 z-50 animate-toast">
+                            {toast.type === 'error' ? (
+                                <i className="fa-solid fa-circle-exclamation text-rose-500 text-sm"></i>
+                            ) : (
+                                <i className="fa-solid fa-circle-check text-emerald-500 text-sm"></i>
+                            )}
+                            <span>{toast.message}</span>
+                        </div>
+                    )}
+
+                </div>
+            );
+        }
+
+        // Connect Application Container into Real DOM Target
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
                 region: B2_REGION
             });
             const s3 = new AWS.S3({
