@@ -1,108 +1,589 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-<title>Easytmp — Money Manage By Kina Studio</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easytmp - Money Management</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3@3.500.0/dist/umd/aws-sdk-client-s3.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;700&display=swap');
+        body { font-family: 'Sarabun', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
 
-<!-- CDNs -->
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://sdk.amazonaws.com/js/aws-sdk-2.1450.0.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <div id="root"></div>
 
-<style>
-/* ─── BASE ─── */
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-html{-webkit-tap-highlight-color:transparent;}
-body{font-family:'Prompt',sans-serif;background:#f0f4f8;min-height:100vh;-webkit-font-smoothing:antialiased;}
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-/* ─── ANIMATIONS ─── */
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-@keyframes slideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
-@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
-@keyframes scaleIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-@keyframes rowIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
-@keyframes toast{0%{opacity:0;transform:translateY(20px) scale(.95)}15%,85%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-10px) scale(.95)}}
+        // ==========================================
+        // 🔒 กรอกรหัสพิกัดเชื่อมต่อตรงนี้ให้ครบถ้วนนะครับ
+        // ==========================================
+        const SUPABASE_URL = "YOUR_SUPABASE_URL";
+        const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
 
-.anim-fadeIn{animation:fadeIn .4s ease both;}
-.anim-slideUp{animation:slideUp .45s cubic-bezier(.22,1,.36,1) both;}
-.anim-scaleIn{animation:scaleIn .3s cubic-bezier(.22,1,.36,1) both;}
-.anim-rowIn{animation:rowIn .3s ease both;}
+        const B2_ENDPOINT = "https://s3.us-west-004.backblazeb2.com"; // ต้องมี https:// นำหน้า
+        const B2_REGION = "us-west-004"; // 🌟 แยก Region ออกมาแก้บัค Network Fail
+        const B2_BUCKET_NAME = "YOUR_BUCKET_NAME";
+        const B2_ACCESS_KEY_ID = "YOUR_ACCESS_KEY_ID";
+        const B2_SECRET_ACCESS_KEY = "YOUR_SECRET_ACCESS_KEY";
+        const B2_PUBLIC_BASE_URL = "https://f004.backblazeb2.com/file/YOUR_BUCKET_NAME/"; 
 
-/* ─── AUTH ─── */
-.auth-bg{
-  min-height:100vh;
-  background:linear-gradient(135deg,#e8f5e9 0%,#f3e5f5 50%,#e3f2fd 100%);
-  display:flex;align-items:center;justify-content:center;padding:1rem;
-}
-.auth-card{
-  background:#fff;border-radius:28px;
-  box-shadow:0 24px 80px rgba(0,0,0,.13);
-  padding:2.5rem 2rem;width:100%;max-width:440px;
-  animation:scaleIn .4s cubic-bezier(.22,1,.36,1) both;
-}
-.auth-logo{text-align:center;margin-bottom:1.5rem;}
-.auth-logo img{max-width:200px;height:auto;}
-.auth-tabs{display:flex;background:#f5f5f5;border-radius:14px;padding:5px;margin-bottom:1.75rem;gap:5px;}
-.auth-tab{
-  flex:1;padding:.6rem;border:none;background:transparent;
-  border-radius:10px;font-family:'Prompt',sans-serif;font-size:.9rem;
-  font-weight:500;color:#888;cursor:pointer;transition:all .25s;
-}
-.auth-tab.active{background:#fff;color:#2e7d32;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.1);}
+        // เริ่มต้นการทำงานของ Supabase Client
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ─── FIELD ─── */
-.field-group{margin-bottom:1rem;}
-.field-label{display:block;font-size:.8rem;font-weight:600;color:#555;margin-bottom:.4rem;}
-.field-label-amber{color:#f57c00;}
-.field-hint{font-size:.72rem;color:#aaa;margin-top:.3rem;}
-.field-input{
-  width:100%;padding:.75rem 1rem;border:2px solid #e8e8e8;border-radius:12px;
-  font-family:'Prompt',sans-serif;font-size:.9rem;color:#333;
-  transition:border-color .2s,box-shadow .2s;outline:none;background:#fafafa;
-}
-.field-input:focus{border-color:#4caf50;box-shadow:0 0 0 3px rgba(76,175,80,.15);background:#fff;}
-.divider{border:none;border-top:1px solid #f0f0f0;margin:1.1rem 0;}
+        function App() {
+            // ระบบจัดการสัญญานและหน้าจอ
+            const [user, setUser] = useState(null);
+            const [profile, setProfile] = useState(null);
+            const [company, setCompany] = useState(null);
+            const [transactions, setTransactions] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [actionLoading, setActionLoading] = useState(false);
 
-/* ─── BUTTONS ─── */
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
-  padding:.75rem 1.25rem;border:none;border-radius:12px;
-  font-family:'Prompt',sans-serif;font-weight:700;font-size:.9rem;
-  cursor:pointer;transition:all .22s;white-space:nowrap;
-}
-.btn:disabled{opacity:.55;cursor:not-allowed;transform:none!important;box-shadow:none!important;}
-.btn-full{width:100%;}
-.btn-green{background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;}
-.btn-green:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 20px rgba(46,125,50,.35);}
-.btn-blue{background:linear-gradient(135deg,#42a5f5,#1565c0);color:#fff;}
-.btn-blue:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 20px rgba(21,101,192,.35);}
-.btn-indigo{background:linear-gradient(135deg,#7c4dff,#512da8);color:#fff;}
-.btn-indigo:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 18px rgba(124,77,255,.3);}
-.btn-red{background:linear-gradient(135deg,#ef5350,#b71c1c);color:#fff;}
-.btn-red:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 18px rgba(183,28,28,.3);}
-.btn-amber{background:linear-gradient(135deg,#ffa726,#e65100);color:#fff;}
-.btn-amber:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 18px rgba(230,81,0,.3);}
-.btn-ghost{background:#f5f5f5;color:#555;border:2px solid #e8e8e8;}
-.btn-ghost:hover:not(:disabled){background:#eee;}
-.btn-icon{padding:.5rem;border-radius:8px;font-size:.82rem;}
-.btn-edit{background:#e3f2fd;color:#1565c0;}
-.btn-edit:hover{background:#bbdefb;}
-.btn-del{background:#fce4ec;color:#c62828;}
-.btn-del:hover{background:#f8bbd0;}
-.btn-logout{
-  padding:.6rem 1.3rem;background:#fff1f1;color:#e53935;
-  border:2px solid #ffcdd2;border-radius:10px;
-  font-family:'Prompt',sans-serif;font-weight:600;cursor:pointer;transition:all .2s;font-size:.88rem;
-}
-.btn-logout:hover{background:#e53935;color:#fff;border-color:#e53935;}
+            // ฟอร์มสำหรับเข้าสู่ระบบ / สมัครสมาชิก
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [isSignUp, setIsSignUp] = useState(false);
+            const [companyIdInput, setCompanyIdInput] = useState('');
+
+            // ฟอร์มเพิ่ม/แก้ไข ธุรกรรม
+            const [desc, setDesc] = useState('');
+            const [amount, setAmount] = useState('');
+            const [type, setType] = useState('income');
+            const [slipFile, setSlipFile] = useState(null);
+            const [slipPreview, setSlipPreview] = useState(null);
+
+            // สถานะจัดการหน้าต่าง Modal Popup
+            const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+            const [selectedTransaction, setSelectedTransaction] = useState(null);
+            const [isAdminOpen, setIsAdminOpen] = useState(false);
+
+            useEffect(() => {
+                // เช็กสถานะการล็อกอินปัจจุบัน
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    if (session) {
+                        setUser(session.user);
+                        fetchUserData(session.user.id);
+                    } else {
+                        setLoading(false);
+                    }
+                });
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    if (session) {
+                        setUser(session.user);
+                        fetchUserData(session.user.id);
+                    } else {
+                        setUser(null);
+                        setProfile(null);
+                        setCompany(null);
+                        setTransactions([]);
+                        setLoading(false);
+                    }
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            // ดึงข้อมูลผู้ใช้, บริษัท และรายการธุรกรรม
+            async function fetchUserData(userId) {
+                try {
+                    setLoading(true);
+                    const { data: profData, error: profErr } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', userId)
+                        .single();
+
+                    if (profErr) throw profErr;
+                    setProfile(profData);
+
+                    if (profData?.company_id) {
+                        const { data: compData, error: compErr } = await supabase
+                            .from('companies')
+                            .select('*')
+                            .eq('company_id', profData.company_id)
+                            .single();
+                        if (compErr) throw compErr;
+                        setCompany(compData);
+
+                        const { data: transData, error: transErr } = await supabase
+                            .from('transactions')
+                            .select('*')
+                            .eq('company_id', profData.company_id)
+                            .order('created_at', { ascending: false });
+                        if (transErr) throw transErr;
+                        setTransactions(transData);
+                    }
+                } catch (err) {
+                    console.error("Error fetching data:", err.message);
+                    alert("เกิดข้อผิดพลาดในการดึงข้อมูล: " + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            }
+
+            // จัดการระบบ Auth (Login / Sign Up)
+            async function handleAuth(e) {
+                e.preventDefault();
+                if (!email || !password) return alert("กรุณากรอกข้อมูลให้ครบถ้อยคำ");
+                setActionLoading(true);
+
+                try {
+                    if (isSignUp) {
+                        if (!companyIdInput) {
+                            setActionLoading(false);
+                            return alert("กรุณาระบุ ID บริษัทที่ต้องการเข้าร่วม");
+                        }
+                        const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
+                        if (authErr) throw authErr;
+
+                        if (authData?.user) {
+                            const { error: profErr } = await supabase
+                                .from('profiles')
+                                .insert([{ id: authData.user.id, company_id: companyIdInput }]);
+                            if (profErr) throw profErr;
+                            alert("สมัครสมาชิกสำเร็จระบบกำลังพาท่านเข้าสู่แดชบอร์ด");
+                        }
+                    } else {
+                        const { error: logErr } = await supabase.auth.signInWithPassword({ email, password });
+                        if (logErr) throw logErr;
+                    }
+                } catch (err) {
+                    alert("เกิดข้อผิดพลาด: " + err.message);
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // จัดการพรีวิวรูปภาพเมื่อเลือกสลิป
+            function handleFileChange(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    setSlipFile(file);
+                    setSlipPreview(URL.createObjectURL(file));
+                }
+            }
+
+            // ฟังก์ชันอัปโหลดรูปขึ้น Backblaze B2 (แก้ไขโครงสร้าง Region เพื่อแก้ปัญหา Network Fail)
+            async function uploadToB2(file) {
+                const s3Client = new awsSDK.S3({
+                    endpoint: B2_ENDPOINT,
+                    region: B2_REGION, // 🌟 ใช้ค่าภูมิภาคที่ถูกต้องแทน 'auto'
+                    credentials: {
+                        accessKeyId: B2_ACCESS_KEY_ID,
+                        secretAccessKey: B2_SECRET_ACCESS_KEY
+                    }
+                });
+
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+
+                await s3Client.putObject({
+                    Bucket: B2_BUCKET_NAME,
+                    Key: fileName,
+                    Body: file,
+                    ContentType: file.type
+                });
+
+                return `${B2_PUBLIC_BASE_URL}${fileName}`;
+            }
+
+            // ฟังก์ชันเพิ่มรายการธุรกรรมใหม่
+            async function handleAddTransaction(e) {
+                e.preventDefault();
+                if (!desc || !amount) return alert("กรุณากรอกชื่อรายการและจำนวนเงิน");
+                setActionLoading(true);
+
+                try {
+                    let uploadedImageUrl = null;
+                    if (slipFile) {
+                        uploadedImageUrl = await uploadToB2(slipFile);
+                    }
+
+                    const { error } = await supabase
+                        .from('transactions')
+                        .insert([{
+                            description: desc,
+                            amount: parseFloat(amount),
+                            type: type,
+                            image_url: uploadedImageUrl,
+                            company_id: profile.company_id
+                        }]);
+
+                    if (error) throw error;
+
+                    // เคลียร์ฟอร์ม
+                    setDesc('');
+                    setAmount('');
+                    setSlipFile(null);
+                    setSlipPreview(null);
+                    fetchUserData(user.id);
+                } catch (err) {
+                    alert("บันทึกไม่สำเร็จ: " + err.message);
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // ฟังก์ชันลบรายการธุรกรรม (ลบจากฐานข้อมูล Supabase)
+            async function handleDeleteTransaction(id) {
+                if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการลบรายการนี้อย่างถาวร?")) return;
+                setActionLoading(true);
+                try {
+                    const { error } = await supabase.from('transactions').delete().eq('id', id);
+                    if (error) throw error;
+                    fetchUserData(user.id);
+                } catch (err) {
+                    alert("ลบไม่สำเร็จ: " + err.message);
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // ฟังก์ชันเปิดหน้าต่างแก้ไขข้อมูล
+            function openEditModal(trans) {
+                setSelectedTransaction(trans);
+                setDesc(trans.description);
+                setAmount(trans.amount);
+                setType(trans.type);
+                setSlipPreview(trans.image_url);
+                setIsEditModalOpen(true);
+            }
+
+            // ฟังก์ชันอัปเดตข้อมูลรายการหลังกดแก้ไข (แก้ไขบัคตัวเลือกเปลี่ยนสลิปใหม่)
+            async function handleUpdateTransaction(e) {
+                e.preventDefault();
+                setActionLoading(true);
+                try {
+                    let finalImageUrl = selectedTransaction.image_url;
+                    
+                    // 🌟 เพิ่มสิทธิ์การเช็กหากผู้ใช้เลือกไฟล์ภาพใหม่ตอนแก้ไข
+                    if (slipFile && slipPreview !== selectedTransaction.image_url) {
+                        finalImageUrl = await uploadToB2(slipFile);
+                    }
+
+                    const { error } = await supabase
+                        .from('transactions')
+                        .update({
+                            description: desc,
+                            amount: parseFloat(amount),
+                            type: type,
+                            image_url: finalImageUrl
+                        })
+                        .eq('id', selectedTransaction.id);
+
+                    if (error) throw error;
+
+                    // 🌟 ล้างสถานะและปิดหน้าต่างหลังแก้ไขสำเร็จ
+                    setIsEditModalOpen(false);
+                    setSelectedTransaction(null);
+                    setDesc('');
+                    setAmount('');
+                    setSlipFile(null);
+                    setSlipPreview(null);
+                    fetchUserData(user.id);
+                } catch (err) {
+                    alert("แก้ไขข้อมูลไม่สำเร็จ: " + err.message);
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            // ฟังก์ชันอัปโหลดโลโก้บริษัทขึ้น Supabase Storage
+            async function handleLogoUpload(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                setActionLoading(true);
+
+                try {
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${profile.company_id}-${Date.now()}.${fileExt}`;
+
+                    // อัปโหลดเข้า Bucket 'logos' บน Supabase
+                    const { data, error: uploadErr } = await supabase.storage
+                        .from('logos')
+                        .upload(fileName, file, { cacheControl: '3600', upsert: true });
+
+                    if (uploadErr) throw uploadErr;
+
+                    const { data: { publicUrl } } = supabase.storage.from('logos').getPublicUrl(fileName);
+
+                    // บันทึกลิงก์ลงคอลัมน์ logo_url ในตาราง companies
+                    const { error: updateErr } = await supabase
+                        .from('companies')
+                        .update({ logo_url: publicUrl })
+                        .eq('company_id', profile.company_id);
+
+                    if (updateErr) throw updateErr;
+
+                    alert("อัปโหลดโลโก้บริษัทสำเร็จ!");
+                    fetchUserData(user.id);
+                } catch (err) {
+                    alert("อัปโหลดโลโก้ล้มเหลว: " + err.message);
+                } finally {
+                    setActionLoading(false);
+                }
+            }
+
+            if (loading) {
+                return (
+                    <div class="flex flex-col items-center justify-center min-h-screen bg-slate-50">
+                        <div class="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                        <p class="text-slate-500 font-medium">กำลังเตรียมข้อมูลระบบสักครู่...</p>
+                    </div>
+                );
+            }
+
+            // หน้าจอสำหรับล็อกอิน / สมัครสมาชิก
+            if (!user) {
+                return (
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="bg-white p-8 rounded-2xl shadow-xl border border-slate-100 max-w-md w-full transition-all">
+                            <div class="text-center mb-8">
+                                <h2 class="text-3xl font-black text-slate-900 tracking-tight">Easytmp</h2>
+                                <p class="text-slate-500 mt-2">{isSignUp ? 'สร้างบัญชีผู้ใช้ใหม่สำหรับสตูดิโอของคุณ' : 'ระบบจัดการบัญชีและการเงินแบบ Multi-tenant'}</p>
+                            </div>
+
+                            <form onSubmit={handleAuth} class="space-y-5">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">อีเมล</label>
+                                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" placeholder="name@company.com" />
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">รหัสผ่าน</label>
+                                    <input type="password" value={password} onChange={e => setPassword(e.target.value)} class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" placeholder="••••••••" />
+                                </div>
+
+                                {isSignUp && (
+                                    <div class="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                                        <label class="block text-sm font-bold text-amber-800 mb-1.5">รหัส ID บริษัท (Company ID)</label>
+                                        <input type="text" value={companyIdInput} onChange={e => setCompanyIdInput(e.target.value)} class="w-full px-4 py-2 bg-white rounded-lg border border-amber-200 focus:outline-none focus:ring-2 focus:ring-emerald-500" placeholder="ระบุ ID เช่น COMP_A" />
+                                    </div>
+                                )}
+
+                                <button type="submit" disabled={actionLoading} class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition duration-150 shadow-md disabled:opacity-50">
+                                    {actionLoading ? 'กำลังประมวลผล...' : (isSignUp ? 'สมัครสมาชิก' : 'เข้าสู่ระบบ')}
+                                </button>
+                            </form>
+
+                            <div class="mt-6 text-center">
+                                <button onClick={() => { setIsSignUp(!isSignUp); setCompanyIdInput(''); }} class="text-sm text-emerald-600 font-semibold hover:underline">
+                                    {isSignUp ? 'มีบัญชีผู้ใช้อยู่แล้ว? เข้าสู่ระบบที่นี่' : 'ยังไม่มีบัญชีผู้ใช้? สมัครเข้าร่วมบริษัทที่นี่'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // คำนวณสรุปยอดเงินสดปัจจุบัน
+            const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+            const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+            const balance = totalIncome - totalExpense;
+
+            return (
+                <div class="max-w-6xl mx-auto px-4 py-8">
+                    
+                    {/* 🏢 ส่วนหัว Dashboard พร้อมแก้บักแบบเสถียร (Optional Chaining) */}
+                    <header class="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8 gap-4">
+                        <div class="flex items-center space-x-4">
+                            {company?.logo_url ? (
+                                <img src={company.logo_url} alt="Logo" class="w-16 h-16 rounded-xl object-cover border border-slate-100 shadow-sm" />
+                            ) : (
+                                <div class="w-16 h-16 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-3xl text-white shadow-md">
+                                    🏢
+                                </div>
+                            )}
+                            <div>
+                                <h1 class="text-2xl font-black text-slate-900 tracking-tight">Easytmp</h1>
+                                <p class="text-md text-emerald-600 font-bold">🏢 บริษัท: {company?.company_name || 'ไม่ระบุชื่อบริษัท'}</p>
+                                <p class="text-xs text-slate-400">ID แพลตฟอร์ม: {profile?.company_id}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 w-full md:w-auto">
+                            <button onClick={() => setIsAdminOpen(true)} class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold transition">⚙️ ตั้งค่าบริษัท</button>
+                            <button onClick={() => supabase.auth.signOut()} class="bg-rose-500 hover:bg-rose-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition shadow-sm">ออกจากระบบ</button>
+                        </div>
+                    </header>
+
+                    {/* กล่องสรุปสถานะการเงิน (Financial Cards) */}
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <p class="text-sm font-semibold text-slate-400 uppercase tracking-wider">ยอดเงินคงเหลือสุทธิ</p>
+                            <p class={`text-3xl font-black mt-2 ${balance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>{balance.toLocaleString()} ฿</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm border-l-4 border-l-emerald-500">
+                            <p class="text-sm font-semibold text-emerald-600 uppercase tracking-wider">รายรับรวม</p>
+                            <p class="text-3xl font-black text-slate-900 mt-2">+{totalIncome.toLocaleString()} ฿</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm border-l-4 border-l-rose-500">
+                            <p class="text-sm font-semibold text-rose-500 uppercase tracking-wider">รายจ่ายรวม</p>
+                            <p class="text-3xl font-black text-slate-900 mt-2">-{totalExpense.toLocaleString()} ฿</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {/* ฟอร์มกรอกบันทึกรายการธุรกรรมใหม่ */}
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
+                            <h3 class="text-lg font-black text-slate-900 mb-4 tracking-tight">📝 เพิ่มบันทึกรายการบัญชี</h3>
+                            <form onSubmit={handleAddTransaction} class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-600 mb-1">ชื่อรายการความเคลื่อนไหว</label>
+                                    <input type="text" value={desc} onChange={e => setDesc(e.target.value)} class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm" placeholder="เช่น ค่าสตู, ค่าโฆษณาเพจ" />
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-600 mb-1">จำนวนเงิน (บาท)</label>
+                                    <input type="number" value={amount} onChange={e => setAmount(e.target.value)} class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm" placeholder="0.00" />
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-600 mb-1">ประเภทธุรกรรม</label>
+                                    <select value={type} onChange={e => setType(e.target.value)} class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none text-sm">
+                                        <option value="income">🟢 รายรับ (Income)</option>
+                                        <option value="expense">🔴 รายจ่าย (Expense)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-600 mb-1">แนบไฟล์รูปภาพหลักฐาน / สลิป</label>
+                                    <input type="file" accept="image/*" onChange={handleFileChange} class="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer" />
+                                    {slipPreview && (
+                                        <div class="mt-3 relative border rounded-xl overflow-hidden bg-slate-50 max-h-40 flex items-center justify-center">
+                                            <img src={slipPreview} alt="Preview" class="object-contain max-h-40 w-full" />
+                                            <button type="button" onClick={() => { setSlipFile(null); setSlipPreview(null); }} class="absolute top-1 right-1 bg-rose-600 text-white rounded-full p-1 text-xs w-6 h-6 flex items-center justify-center font-bold">✕</button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <button type="submit" disabled={actionLoading} class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition shadow-sm disabled:opacity-50">
+                                    {actionLoading ? 'กำลังบันทึกและส่งสลิป...' : '➕ บันทึกรายการล่าสุด'}
+                                </button>
+                            </form>
+                        </div>
+
+                        {/* ตารางแสดงประวัติรายการเดินบัญชีทั้งหมด */}
+                        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-black text-slate-900 mb-4 tracking-tight">⏳ ประวัติรายการเดินบัญชี</h3>
+                            {transactions.length === 0 ? (
+                                <div class="text-center py-12 text-slate-400 text-sm">ยังไม่มีรายการบันทึกของบริษัทในระบบขณะนี้</div>
+                            ) : (
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm border-collapse">
+                                        <thead>
+                                            <tr class="border-b border-slate-100 text-slate-400 font-semibold">
+                                                <th class="py-3 px-2">วันที่ / เวลา</th>
+                                                <th class="py-3 px-2">รายการ</th>
+                                                <th class="py-3 px-2">จำนวนเงิน</th>
+                                                <th class="py-3 px-2">หลักฐาน</th>
+                                                <th class="py-3 px-2 text-right">เครื่องมือ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-50">
+                                            {transactions.map(t => (
+                                                <tr key={t.id} class="hover:bg-slate-50/50 transition">
+                                                    <td class="py-3 px-2 text-xs text-slate-400">{new Date(t.created_at).toLocaleString('th-TH', { hour12: false })}</td>
+                                                    <td class="py-3 px-2 font-medium text-slate-800">{t.description}</td>
+                                                    <td class={`py-3 px-2 font-bold ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                                        {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString()} ฿
+                                                    </td>
+                                                    <td class="py-3 px-2">
+                                                        {t.image_url ? (
+                                                            <a href={t.image_url} target="_blank" rel="noreferrer" class="inline-flex items-center text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md font-semibold hover:underline">📄 ดูรูปสลิป</a>
+                                                        ) : (
+                                                            <span class="text-xs text-slate-300">ไม่มีสลิป</span>
+                                                        )}
+                                                    </td>
+                                                    <td class="py-3 px-2 text-right space-x-2">
+                                                        <button onClick={() => openEditModal(t)} class="text-slate-500 hover:text-slate-800 text-xs font-semibold bg-slate-100 px-2 py-1 rounded-md">✏️ แก้ไข</button>
+                                                        <button onClick={() => handleDeleteTransaction(t.id)} class="text-rose-500 hover:text-rose-700 text-xs font-semibold bg-rose-50 px-2 py-1 rounded-md">🗑️ ลบ</button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* 🔧 หน้าต่างแก้ไขรายการบัญชี (Edit Modal) */}
+                    {isEditModalOpen && (
+                        <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                            <div class="bg-white p-6 rounded-2xl shadow-xl border w-full max-w-md animate-in fade-in zoom-in-95 duration-150">
+                                <h3 class="text-lg font-black text-slate-900 mb-4">🔧 แก้ไขข้อมูลรายการบัญชี</h3>
+                                <form onSubmit={handleUpdateTransaction} class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-600 mb-1">ชื่อรายการ</label>
+                                        <input type="text" value={desc} onChange={e => setDesc(e.target.value)} class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none text-sm" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-600 mb-1">จำนวนเงิน</label>
+                                        <input type="number" value={amount} onChange={e => setAmount(e.target.value)} class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none text-sm" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-600 mb-1">ประเภทธุรกรรม</label>
+                                        <select value={type} onChange={e => setType(e.target.value)} class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none text-sm">
+                                            <option value="income">🟢 รายรับ (Income)</option>
+                                            <option value="expense">🔴 รายจ่าย (Expense)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-600 mb-1">เปลี่ยนรูปสลิปหลักฐานใหม่</label>
+                                        <input type="file" accept="image/*" onChange={handleFileChange} class="w-full text-xs text-slate-500 cursor-pointer" />
+                                        {slipPreview && (
+                                            <img src={slipPreview} alt="Preview" class="mt-2 object-contain max-h-32 mx-auto border rounded-lg" />
+                                        )}
+                                    </div>
+                                    <div class="flex space-x-3 pt-2">
+                                        <button type="button" onClick={() => { setIsEditModalOpen(false); setSelectedTransaction(null); }} class="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-xl text-sm transition">ยกเลิก</button>
+                                        <button type="submit" disabled={actionLoading} class="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl text-sm transition shadow-sm disabled:opacity-50">
+                                            {actionLoading ? 'กำลังบันทึก...' : '💾 บันทึกการแก้ไข'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ⚙️ หน้าต่างตั้งค่าบริษัทสตูและโลโก้ (Admin Modal) */}
+                    {isAdminOpen && (
+                        <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                            <div class="bg-white p-6 rounded-2xl shadow-xl border w-full max-w-md">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="text-lg font-black text-slate-900">⚙️ ตั้งค่าข้อมูลบริษัท</h3>
+                                    <button onClick={() => setIsAdminOpen(false)} class="text-slate-400 hover:text-slate-600 font-bold text-xl">✕</button>
+                                </div>
+                                <div class="space-y-4">
+                                    <div>
+                                        <p class="text-sm font-semibold text-slate-500 mb-1">ชื่อสตู / กลุ่มบริษัทของคุณ</p>
+                                        <p class="text-md font-bold text-slate-800 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">{company?.company_name || 'ไม่ได้ระบุชื่อบริษัท'}</p>
+                                    </div>
+                                    <div class="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+                                        <label class="block text-sm font-bold text-emerald-800 mb-2">อัปโหลดรูปโลโก้บริษัทใหม่</label>
+                                        <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={actionLoading} class="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer disabled:opacity-50" />
+                                        <p class="text-[11px] text-emerald-600 mt-1.5">เมื่อเลือกรูปเสร็จ ระบบจะอัปโหลดรูปตรงขึ้นสู่คลังข้อมูล Supabase Storage ของคุณให้อัตโนมัติทันที</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setIsAdminOpen(false)} class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-xl text-sm mt-5 transition">ปิดหน้าต่างการตั้งค่า</button>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
 
 /* ─── SPINNER ─── */
 .spinner{
