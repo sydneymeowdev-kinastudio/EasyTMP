@@ -13,6 +13,8 @@
 <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1450.0.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<!-- Vercel Web Analytics -->
+<script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 
 <style>
 /* ─── BASE ─── */
